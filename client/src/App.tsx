@@ -117,7 +117,7 @@ const [playersOnline, setPlayersOnline] = useState<{id:string;name:string;factio
   function factionName(fid:string){ return (world?.factions.find(f => f.id===fid)?.name) || (fid==="neutral" ? "Neutral" : fid); }
   const myTroopsAt = (tileId:string) => (me?.troops?.[tileId] || 0);
   const defenders = (t:Tile) => t.control;
-  const totalVisibleTroops = (t:Tile) => (defenders(t) + (me ? myTroopsAt(t.id) : 0));
+  const totalVisibleTroops = (t: Tile) => (defenders(t) + (t.publicTroops || 0));
 
   // Camera
   const baseBox = useMemo(() => {
