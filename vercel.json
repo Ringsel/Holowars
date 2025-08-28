@@ -1,10 +1,7 @@
 {
   "version": 2,
-  "env": {
-    "VITE_SERVER_URL": "@VITE_SERVER_URL"
-  },
-  "buildCommand": "cd client && npm ci && npm run build",
-  "installCommand": "cd client && npm ci",
+  "buildCommand": "cd client && npm install && npm run build",
+  "installCommand": "cd client && npm install",
   "outputDirectory": "client/dist",
   "framework": "vite"
 }
