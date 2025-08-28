@@ -3,7 +3,15 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 
 type Faction = { id: string; name: string; color: string };
-type Tile = { id: string; q: number; r: number; ownerFaction: string; control: number; isCapital: boolean };
+ type Tile = {
+   id: string;
+   q: number;
+   r: number;
+   ownerFaction: string;
+   control: number;
+   isCapital: boolean;
+publicTroops?: number; // from server: sum of all players' troops on this tile
+ };
 type World = { tiles: Record<string, Tile>; factions: Faction[]; capitalsByFaction: Record<string, string> };
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL as string) || "http://localhost:8787";

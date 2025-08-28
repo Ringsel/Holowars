@@ -1,11 +1,7 @@
-
 // server/server.js (ESM)
-// Ringsel Holo Wars — production-ready server improvements:
-// - Persistence (JSON snapshot to ./data/state.json) — optional but enabled by default
-// - Optional Redis scaling for Socket.IO if REDIS_URL is set
-// - Simple auth token & session resume (one live socket per token; IP lock optional)
-// - Rate limiting for actions (token bucket)
-// - Pentagon world generation with five factions/capitals
+// Ringsel Holo Wars — production-ready server with publicTroops broadcast
+// Adds tile.publicTroops (sum of all players' troops on a tile) and emits tile_update
+// wherever troops change so every client sees the same big number in realtime.
 //
 // Run locally:
 //   npm i express socket.io cors uuid
@@ -132,6 +128,7 @@ function buildPentagonWorld() {
         ownerFaction: "neutral",
         control: NEUTRAL_DEFENDERS_DEFAULT,
         isCapital: false,
+        publicTroops: 0 // NEW: public sum of all players' troops on this tile
       });
     }
   }
@@ -207,6 +204,19 @@ const players = new Map(); // token -> player
 const tokenToSocket = new Map(); // token -> socket.id
 const ipToToken = new Map();     // ip -> token (only if IP lock enabled)
 
+// NEW: recompute and persist publicTroops
+function recalcPublicTroops(tileId) {
+  let sum = 0;
+  for (const p of players.values()) sum += (p.troops[tileId] || 0);
+  const t = tiles.get(tileId);
+  if (t) t.publicTroops = sum;
+}
+function recalcAllPublicTroops() {
+  for (const t of tiles.values()) {
+    recalcPublicTroops(t.id);
+  }
+}
+
 function snapshot() {
   const data = {
     world: {
@@ -240,7 +250,8 @@ function loadSnapshot() {
     // restore world tiles (mutable)
     tiles.clear();
     for (const t of data.world.tiles) {
-      tiles.set(t.id, t);
+      // ensure publicTroops exists in old snapshots
+      tiles.set(t.id, { ...t, publicTroops: typeof t.publicTroops === 'number' ? t.publicTroops : 0 });
     }
     world.factions = data.world.factions || factions;
     world.capitalsByFaction = data.world.capitalsByFaction || capitalsByFaction;
@@ -257,6 +268,10 @@ function loadSnapshot() {
         ipToToken.set(ip, token);
       }
     }
+
+    // recompute publicTroops from restored players
+    recalcAllPublicTroops();
+
     console.log("State snapshot loaded:", PERSIST_FILE);
   } catch (e) {
     console.error("Failed to load snapshot:", e);
@@ -392,7 +407,11 @@ io.on("connection", (socket) => {
     };
     // Start with troops at capital
     const capId = capitalsByFaction[factionId];
-    if (capId) p.troops[capId] = (p.troops[capId] || 0) + START_TROOPS;
+    if (capId) {
+      p.troops[capId] = (p.troops[capId] || 0) + START_TROOPS;
+      recalcPublicTroops(capId);
+      io.emit("tile_update", { tile: tiles.get(capId) });
+    }
 
     players.set(token, p);
     tokenToSocket.set(token, socket.id);
@@ -439,6 +458,7 @@ io.on("connection", (socket) => {
 
     p.inventory -= amount;
     p.troops[targetId] = (p.troops[targetId] || 0) + amount;
+    recalcPublicTroops(targetId);
     socket.emit("me_update", buildMe(p));
     io.emit("tile_update", { tile: tiles.get(targetId) });
   });
@@ -464,6 +484,8 @@ io.on("connection", (socket) => {
     if (p.troops[fromId] <= 0) delete p.troops[fromId];
     p.troops[toId] = (p.troops[toId] || 0) + amount;
 
+    recalcPublicTroops(fromId);
+    recalcPublicTroops(toId);
     socket.emit("me_update", buildMe(p));
     io.emit("tile_update", { tile: tiles.get(fromId) });
     io.emit("tile_update", { tile: tiles.get(toId) });
@@ -490,6 +512,7 @@ io.on("connection", (socket) => {
 
     const defenders = target.control;
     if (amount > defenders) {
+      // capture succeeds
       p.troops[fromId] -= amount;
       if (p.troops[fromId] <= 0) delete p.troops[fromId];
 
@@ -498,15 +521,19 @@ io.on("connection", (socket) => {
       target.control = 0;
       p.troops[targetId] = (p.troops[targetId] || 0) + survivors;
 
+      recalcPublicTroops(fromId);
+      recalcPublicTroops(targetId);
       socket.emit("me_update", buildMe(p));
       io.emit("combat_result", { fromId, targetId, survivors });
       io.emit("tile_update", { tile: tiles.get(fromId) });
       io.emit("tile_update", { tile: tiles.get(targetId) });
     } else {
+      // attack fails; attackers wiped on that action, defenders reduced
       p.troops[fromId] -= amount;
       if (p.troops[fromId] <= 0) delete p.troops[fromId];
       target.control = defenders - amount;
 
+      recalcPublicTroops(fromId);
       socket.emit("me_update", buildMe(p));
       io.emit("tile_update", { tile: tiles.get(fromId) });
       io.emit("tile_update", { tile: tiles.get(targetId) });
